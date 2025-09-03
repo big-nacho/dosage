@@ -8,7 +8,6 @@ from dosage import Dosage
 # 3. Run python3 examples/write_to_disk.py
 # 4. See examples/output/{your_video_name.mp4}
 
-
 name = '{your_video_name.ext}'  # <- Your video name goes here
 src = f'examples/input/{name}'
 out_name = f'examples/output/{name}'

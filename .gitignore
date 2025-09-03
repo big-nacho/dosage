@@ -10,3 +10,4 @@ wheelhouse/
 tmp/
 cmake-build-debug/
 __pycache__/
+examples/*
