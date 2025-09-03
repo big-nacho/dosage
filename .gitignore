@@ -1,0 +1,12 @@
+.idea
+.venv
+.DS_Store
+
+bin/
+out/
+build/
+dist/
+wheelhouse/
+tmp/
+cmake-build-debug/
+__pycache__/
