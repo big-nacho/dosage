@@ -5,12 +5,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <pthread.h>
+#include <unistd.h>
 
 typedef enum Method {
     FastMBD,
     Dosage,
     Hybrid
 } Method;
+
+typedef enum Boundary {
+    BoundaryTop,
+    BoundaryRight,
+    BoundaryBottom,
+    BoundaryLeft,
+    BoundaryNone
+} Boundary;
 
 void dosage(
     size_t w,
@@ -20,9 +30,9 @@ void dosage(
     double *work_image,
     double *work_histogram,
     Method method,
-    size_t n_iter,
     double sigma,
-    size_t boundary_size,
-    long n_threads,
+    size_t boundary_thickness,
+    Boundary foreground_boundary,
+    size_t n_passes,
     int *exit
 );

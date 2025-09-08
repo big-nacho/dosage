@@ -1,13 +1,4 @@
-#include <printf.h>
-#include <pthread.h>
-#include <unistd.h>
-
 #include "dosage.h"
-
-// ========== Constants ==========
-static const size_t bin_count = 32; // Number of bins for histograms
-static const long threads_max = 32; // Max number of threads to use
-// ===============================
 
 // ========== Globals ==========
 static size_t width; // Image width
@@ -15,6 +6,7 @@ static size_t height; // Image height
 static size_t color_count; // Color count (width * height)
 static double kernel[63]; // Convolution kernel buffer
 static size_t kernel_radius; // Convolution kernel radius
+static const size_t bin_count = 32; // Number of bins for histograms
 // ===============================
 
 // ========== Indexing macros ==========
@@ -58,32 +50,11 @@ static void normalize_map(double *map) {
     }
 }
 
-long get_thread_count(long requested) {
-    long count = requested;
-
-    if (requested <= 0) {
-        // Auto detect.
-        long n_threads = sysconf(_SC_NPROCESSORS_ONLN);
-        count = n_threads;
-    }
-
-    if (count < 7) {
-        // We need a minimum of 7 threads even if not physical.
-        // This also catches sysconf failures (-1).
-        count = 7;
-    }
-
-    if (count > threads_max) {
-        return threads_max;
-    }
-
-    return count;
-}
-
 // Fast MBD raster scan
 static void raster_scan(
     const double *image,
     size_t channel, // Channel to read while scanning (0 -> R, 1 -> G, 2 -> B)
+    Boundary foreground_boundary,
     double *D,
     double *U,
     double *L
@@ -92,10 +63,28 @@ static void raster_scan(
         for (size_t x = 1; x < width - 1; x++) {
             double v = index_image(image, y, x, channel);
             double d = index_map(D, y, x);
-            double u1 = index_map(U, y - 1, x);
-            double l1 = index_map(L, y - 1, x);
-            double u2 = index_map(U, y, x - 1);
-            double l2 = index_map(L, y, x - 1);
+
+            // This function considers paths that start at a pixel in the image
+            // and move left or up.
+
+            // Offsets
+            size_t ox = -1; // left
+            size_t oy = -1; // up
+
+            // If the left / top boundary is a foreground boundary,
+            // we can't go left / up anymore. We want background connectivity.
+            if (foreground_boundary == BoundaryLeft && x == 1) {
+                ox = 0;
+            }
+
+            if (foreground_boundary == BoundaryTop && y == 1) {
+                oy = 0;
+            }
+
+            double u1 = index_map(U, y + oy, x);
+            double l1 = index_map(L, y + oy, x);
+            double u2 = index_map(U, y, x + ox);
+            double l2 = index_map(L, y, x + ox);
             double b1 = fmax(u1, v) - fmin(l1, v);
             double b2 = fmax(u2, v) - fmin(l2, v);
 
@@ -122,6 +111,7 @@ static void raster_scan(
 static void raster_scan_inverse(
     const double *image,
     size_t channel, // Channel to read while scanning (0 -> R, 1 -> G, 2 -> B)
+    Boundary foreground_boundary,
     double *D,
     double *U,
     double *L
@@ -130,10 +120,28 @@ static void raster_scan_inverse(
         for (size_t x = width - 2; x > 1; x--) {
             double v = index_image(image, y, x, channel);
             double d = index_map(D, y, x);
-            double u1 = index_map(U, y + 1, x);
-            double l1 = index_map(L, y + 1, x);
-            double u2 = index_map(U, y, x + 1);
-            double l2 = index_map(L, y, x + 1);
+
+            // This function considers paths that start at a pixel in the image
+            // and move right or down
+
+            // Offsets
+            size_t ox = 1; // right
+            size_t oy = 1; // down
+
+            // If the right / bottom boundary is a foreground boundary,
+            // we can't go right / down anymore; we want background connectivity.
+            if (foreground_boundary == BoundaryRight && x == width - 2) {
+                ox = 0;
+            }
+
+            if (foreground_boundary == BoundaryBottom && y == height - 2) {
+                oy = 0;
+            }
+
+            double u1 = index_map(U, y + oy, x);
+            double l1 = index_map(L, y + oy, x);
+            double u2 = index_map(U, y, x + ox);
+            double l2 = index_map(L, y, x + ox);
             double b1 = fmax(u1, v) - fmin(l1, v);
             double b2 = fmax(u2, v) - fmin(l2, v);
 
@@ -160,6 +168,7 @@ static double *fast_mbd(
     const double *image,
     size_t channel, // Channel to read while scanning (0 -> R, 1 -> G, 2 -> B)
     size_t iter,
+    Boundary foreground_boundary,
     double *D,
     double *U,
     double *L
@@ -189,6 +198,7 @@ static double *fast_mbd(
             raster_scan(
                 image,
                 channel,
+                foreground_boundary,
                 D,
                 U,
                 L
@@ -198,6 +208,7 @@ static double *fast_mbd(
             raster_scan_inverse(
                 image,
                 channel,
+                foreground_boundary,
                 D,
                 U,
                 L
@@ -212,6 +223,7 @@ typedef struct FastMBDPayload {
     const double *image;
     size_t channel;
     size_t iter;
+    Boundary foreground_boundary;
     double *D;
     double *U;
     double *L;
@@ -223,6 +235,7 @@ void* process_fast_mbd(void* data) {
         payload->image,
         payload->channel,
         payload->iter,
+        payload->foreground_boundary,
         payload->D,
         payload->U,
         payload->L
@@ -319,8 +332,8 @@ void populate_histogram(
 }
 
 void convolve(
-    const double *histogram,
-    size_t axis,
+    const double *histogram, // Histogram to convolve
+    size_t axis, // Axis to convolve
     double *convolved // On exit, contains the result
 ) {
     ssize_t radius = (ssize_t)kernel_radius;
@@ -366,11 +379,13 @@ void convolve(
     }
 }
 
+// Trilinear interpolation helps achieve smoother results than
+// just getting the raw histogram value of a color.
 double trilinear_interpolate(
     const double *histogram,
-    double x,
-    double y,
-    double z
+    double x, // R
+    double y, // G
+    double z // B
 ) {
     double fx, fy, fz;
     size_t i0, j0, k0;
@@ -405,7 +420,7 @@ double trilinear_interpolate(
     return c0 * (1 - tz) + c1 * tz;
 }
 
-void histogram_to_saliency(
+void get_saliency_from_histogram(
     const double *image,
     const double *histogram,
     double *saliency
@@ -426,6 +441,28 @@ void histogram_to_saliency(
     }
 
     normalize_map(saliency);
+}
+
+void create_convolution_kernel(double sigma) {
+    kernel_radius = (size_t)(0.5 + 4.0 * sigma); // Kernel covers ~8 sigma
+
+    if (kernel_radius > 31) {
+        // Cap kernel radius at 31.
+        // This means after a sigma of ~8 tails start getting lost.
+        kernel_radius = 31;
+    }
+
+    double sum = 0;
+    size_t length = 2 * kernel_radius + 1;
+    for (size_t i = 0; i < length; i++) {
+        double x = ((double)i - (double)kernel_radius);
+        kernel[i] = exp(-(x * x) / (2 * sigma * sigma));
+        sum += kernel[i];
+    }
+
+    for (size_t i = 0; i < length; i++) {
+        kernel[i] /= sum;
+    }
 }
 
 typedef struct DosagePayload {
@@ -458,30 +495,8 @@ void *process_dosage(void *data) {
     convolve(aux, 1, histogram);
     memcpy(aux, histogram, sizeof(double) * volume);
     convolve(aux, 2, histogram);
-    histogram_to_saliency(image, histogram, result);
+    get_saliency_from_histogram(image, histogram, result);
     return NULL;
-}
-
-void create_convolution_kernel(double sigma) {
-    kernel_radius = (size_t)(0.5 + 4.0 * sigma); // Kernel covers ~8 sigma
-
-    if (kernel_radius > 31) {
-        // Cap kernel radius at 31.
-        // This means after a sigma of ~8 tails start getting lost.
-        kernel_radius = 31;
-    }
-
-    double sum = 0;
-    size_t length = 2 * kernel_radius + 1;
-    for (size_t i = 0; i < length; i++) {
-        double x = ((double)i - (double)kernel_radius);
-        kernel[i] = exp(-(x * x) / (2 * sigma * sigma));
-        sum += kernel[i];
-    }
-
-    for (size_t i = 0; i < length; i++) {
-        kernel[i] /= sum;
-    }
 }
 
 void dosage(
@@ -492,10 +507,10 @@ void dosage(
     double *work_image,
     double *work_histogram,
     Method method,
-    size_t n_iter,
     double sigma,
-    size_t boundary_size,
-    long n_threads,
+    size_t boundary_thickness,
+    Boundary foreground_boundary,
+    size_t n_passes,
     int *exit
 ) {
     *exit = 0;
@@ -504,62 +519,62 @@ void dosage(
     height = h;
     color_count = w * h;
 
-    size_t thread_count = get_thread_count(n_threads);
-    pthread_t threads[thread_count];
-
     for (size_t i = 0; i < color_count * 3; i++) {
         work_color[i] = (double)colors[i];
     }
 
-    pthread_t t1 = threads[0];
-    pthread_t t2 = threads[1];
-    pthread_t t3 = threads[2];
-    pthread_t t4 = threads[3];
-    pthread_t t5 = threads[4];
-    pthread_t t6 = threads[5];
-    pthread_t t7 = threads[6];
+    pthread_t t1;
+    pthread_t t2;
+    pthread_t t3;
+    pthread_t t4;
+    pthread_t t5;
+    pthread_t t6;
+    pthread_t t7;
 
-    FastMBDPayload L_payload;
-    FastMBDPayload U_payload;
-    FastMBDPayload V_payload;
+    FastMBDPayload R_payload;
+    FastMBDPayload G_payload;
+    FastMBDPayload B_payload;
 
     bool perform_fast_mbd = method != Dosage;
     bool perform_dosage = method != FastMBD;
 
     if (perform_fast_mbd) {
-        L_payload.image = work_color;
-        L_payload.D = work_image;
-        L_payload.U = L_payload.D + color_count;
-        L_payload.L = L_payload.U + color_count;
-        L_payload.channel = 0;
-        L_payload.iter = n_iter;
+        R_payload.image = work_color;
+        R_payload.D = work_image;
+        R_payload.U = R_payload.D + color_count;
+        R_payload.L = R_payload.U + color_count;
+        R_payload.channel = 0;
+        R_payload.foreground_boundary = foreground_boundary;
+        R_payload.iter = n_passes;
 
-        U_payload.image = work_color;
-        U_payload.D = L_payload.L + color_count;
-        U_payload.U = U_payload.D + color_count;
-        U_payload.L = U_payload.U + color_count;
-        U_payload.channel = 1;
-        U_payload.iter = n_iter;
+        G_payload.image = work_color;
+        G_payload.D = R_payload.L + color_count;
+        G_payload.U = G_payload.D + color_count;
+        G_payload.L = G_payload.U + color_count;
+        G_payload.channel = 1;
+        G_payload.foreground_boundary = foreground_boundary;
+        G_payload.iter = n_passes;
 
-        V_payload.image = work_color;
-        V_payload.D = U_payload.L + color_count;
-        V_payload.U = V_payload.D + color_count;
-        V_payload.L = V_payload.U + color_count;
-        V_payload.channel = 2;
-        V_payload.iter = n_iter;
+        B_payload.image = work_color;
+        B_payload.D = G_payload.L + color_count;
+        B_payload.U = B_payload.D + color_count;
+        B_payload.L = B_payload.U + color_count;
+        B_payload.channel = 2;
+        B_payload.foreground_boundary = foreground_boundary;
+        B_payload.iter = n_passes;
 
         // Process FastMBD in parallel
-        if (pthread_create(&t1, NULL, process_fast_mbd, &L_payload) != 0) {
+        if (pthread_create(&t1, NULL, process_fast_mbd, &R_payload) != 0) {
             *exit = 1;
             return;
         }
 
-        if (pthread_create(&t2, NULL, process_fast_mbd, &U_payload) != 0) {
+        if (pthread_create(&t2, NULL, process_fast_mbd, &G_payload) != 0) {
             *exit = 1;
             return;
         }
 
-        if (pthread_create(&t3, NULL, process_fast_mbd, &V_payload) != 0) {
+        if (pthread_create(&t3, NULL, process_fast_mbd, &B_payload) != 0) {
             *exit = 1;
             return;
         }
@@ -569,6 +584,11 @@ void dosage(
     DosagePayload right_payload;
     DosagePayload bottom_payload;
     DosagePayload left_payload;
+
+    bool do_dosage_top = foreground_boundary != BoundaryTop;
+    bool do_dosage_right = foreground_boundary != BoundaryRight;
+    bool do_dosage_bottom = foreground_boundary != BoundaryBottom;
+    bool do_dosage_left = foreground_boundary != BoundaryLeft;
 
     if (perform_dosage) {
         create_convolution_kernel(sigma);
@@ -581,13 +601,13 @@ void dosage(
         top_payload.low_x = 0;
         top_payload.high_x = width;
         top_payload.low_y = 0;
-        top_payload.high_y = boundary_size;
-        top_payload.result = method == Hybrid ? V_payload.L + color_count : work_image;
+        top_payload.high_y = boundary_thickness;
+        top_payload.result = method == Hybrid ? B_payload.L + color_count : work_image;
 
         right_payload.aux = top_payload.histogram + volume;
         right_payload.histogram = right_payload.aux + volume;
         right_payload.image = work_color;
-        right_payload.low_x = width - boundary_size;
+        right_payload.low_x = width - boundary_thickness;
         right_payload.high_x = width;
         right_payload.low_y = 0;
         right_payload.high_y = height;
@@ -598,7 +618,7 @@ void dosage(
         bottom_payload.image = work_color;
         bottom_payload.low_x = 0;
         bottom_payload.high_x = width;
-        bottom_payload.low_y = height - boundary_size;
+        bottom_payload.low_y = height - boundary_thickness;
         bottom_payload.high_y = height;
         bottom_payload.result = right_payload.result + color_count;
 
@@ -606,27 +626,39 @@ void dosage(
         left_payload.histogram = left_payload.aux + volume;
         left_payload.image = work_color;
         left_payload.low_x = 0;
-        left_payload.high_x = boundary_size;
+        left_payload.high_x = boundary_thickness;
         left_payload.low_y = 0;
         left_payload.high_y = height;
         left_payload.result = bottom_payload.result + color_count;
 
-        if (pthread_create(&t4, NULL, process_dosage, &top_payload) != 0) {
+        if (
+            do_dosage_top &&
+            pthread_create(&t4, NULL, process_dosage, &top_payload) != 0
+        ) {
             *exit = 1;
             return;
         }
 
-        if (pthread_create(&t5, NULL, process_dosage, &right_payload) != 0) {
+        if (
+            do_dosage_right &&
+            pthread_create(&t5, NULL, process_dosage, &right_payload) != 0
+        ) {
             *exit = 1;
             return;
         }
 
-        if (pthread_create(&t6, NULL, process_dosage, &bottom_payload) != 0) {
+        if (
+            do_dosage_bottom &&
+            pthread_create(&t6, NULL, process_dosage, &bottom_payload) != 0
+        ) {
             *exit = 1;
             return;
         }
 
-        if (pthread_create(&t7, NULL, process_dosage, &left_payload) != 0) {
+        if (
+            do_dosage_left &&
+            pthread_create(&t7, NULL, process_dosage, &left_payload) != 0
+        ) {
             *exit = 1;
             return;
         }
@@ -639,16 +671,28 @@ void dosage(
 
         // Combine all three results
         for (size_t i = 0; i < color_count; i++) {
-            L_payload.D[i] += U_payload.D[i] + V_payload.D[i];
+            R_payload.D[i] += G_payload.D[i] + B_payload.D[i];
         }
-        normalize_map(L_payload.D);
+
+        normalize_map(R_payload.D);
     }
 
     if (perform_dosage) {
-        pthread_join(t4, NULL);
-        pthread_join(t5, NULL);
-        pthread_join(t6, NULL);
-        pthread_join(t7, NULL);
+        if (do_dosage_top) {
+            pthread_join(t4, NULL);
+        }
+
+        if (do_dosage_right) {
+            pthread_join(t5, NULL);
+        }
+
+        if (do_dosage_bottom) {
+            pthread_join(t6, NULL);
+        }
+
+        if (do_dosage_left) {
+            pthread_join(t7, NULL);
+        }
 
         for (size_t y = 0; y < height; y++) {
             for (size_t x = 0; x < width; x++) {
@@ -656,10 +700,34 @@ void dosage(
                 double r = index_map(right_payload.result, y, x);
                 double b = index_map(bottom_payload.result, y, x);
                 double l = index_map(left_payload.result, y, x);
-                double max = fmax(t, fmax(r, fmax(b, l)));
-                index_map(top_payload.result, y, x) = (t + r + b + l) - max;
+                
+                double max = -1;
+                double sum = 0;
+
+                if (do_dosage_top) {
+                    max = fmax(max, t);
+                    sum += t;
+                }
+
+                if (do_dosage_right) {
+                    max = fmax(max, r);
+                    sum += r;
+                }
+
+                if (do_dosage_bottom) {
+                    max = fmax(max, b);
+                    sum += b;
+                }
+
+                if (do_dosage_left) {
+                    max = fmax(max, l);
+                    sum += l;
+                }
+
+                index_map(top_payload.result, y, x) = sum - max;
             }
         }
+
         normalize_map(top_payload.result);
     }
 

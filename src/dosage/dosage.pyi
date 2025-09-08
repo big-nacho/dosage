@@ -12,7 +12,7 @@ def detect(
     method: int,
     n_iter: int,
     sigma: float,
-    boundary_size: Union[int | Literal["auto"]],
+    boundary_thickness: Union[int | Literal["auto"]],
     n_threads: int
 ) -> bool: ...
 

@@ -10,6 +10,13 @@ cdef extern from 'dosage.h':
         Dosage,
         Hybrid
 
+    cpdef enum Boundary:
+        BoundaryTop,
+        BoundaryRight,
+        BoundaryBottom,
+        BoundaryLeft,
+        BoundaryNone
+
     void dosage(
         size_t w,
         size_t h,
@@ -18,10 +25,10 @@ cdef extern from 'dosage.h':
         double *work_image,
         double *work_histogram,
         Method method,
-        size_t n_iter,
         double sigma,
-        size_t boundary_size,
-        long n_threads,
+        size_t boundary_thickness,
+        Boundary foreground_boundary,
+        size_t n_passes,
         int *exit
     )
 
@@ -33,10 +40,10 @@ def detect(
     cnp.ndarray[cython.double, ndim = 1] work_image,
     cnp.ndarray[cython.double, ndim = 1] work_histogram,
     Method method,
-    size_t n_iter,
     double sigma,
-    size_t boundary_size,
-    long n_threads
+    size_t boundary_thickness,
+    Boundary foreground_boundary,
+    size_t n_passes,
 ):
     cdef uint8_t[:, :] colors_memoryview = colors
     cdef uint8_t *colors_pointer = &colors_memoryview[0, 0]
@@ -60,10 +67,10 @@ def detect(
         work_image_pointer,
         work_histogram_pointer,
         method,
-        n_iter,
         sigma,
-        boundary_size,
-        n_threads,
+        boundary_thickness,
+        foreground_boundary,
+        n_passes,
         &exit
     )
 
@@ -73,9 +80,20 @@ method_fast_mbd = FastMBD
 method_dosage = Dosage
 method_hybrid = Hybrid
 
+boundary_top = BoundaryTop
+boundary_right = BoundaryRight
+boundary_bottom = BoundaryBottom
+boundary_left = BoundaryLeft
+boundary_none = BoundaryNone
+
 __all__ = [
     "detect",
     "method_fast_mbd",
     "method_dosage",
-    "method_hybrid"
+    "method_hybrid",
+    "boundary_top",
+    "boundary_right",
+    "boundary_bottom",
+    "boundary_left",
+    "boundary_none"
 ]

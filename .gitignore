@@ -1,6 +1,7 @@
 .idea
 .venv
 .DS_Store
+.vscode
 
 bin/
 out/
@@ -10,4 +11,3 @@ wheelhouse/
 tmp/
 cmake-build-debug/
 __pycache__/
-examples/*
