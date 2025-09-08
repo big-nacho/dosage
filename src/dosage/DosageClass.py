@@ -17,6 +17,49 @@ from .dosage import (
 )
 
 
+def validate_arguments(
+    width: int,
+    height: int,
+    sigma: float,
+    boundary_thickness: int,
+    n_passes: int,
+    winsor: int,
+    reconstruct_iter: int,
+    reconstruct_scale: float,
+    reconstruct_spread: float,
+    sigmoid_center: float,
+    sigmoid_strength: float
+) -> None:
+    if width < 3 or height < 3:
+        raise ValueError('width and height must be >= 3')
+    
+    if sigma <= 0:
+        raise ValueError('sigma must be > 0')
+    
+    if boundary_thickness != 'auto' and boundary_thickness > min(width, height):
+        raise ValueError('boundary_thickness needs to fit inside the frame')
+    
+    if n_passes <= 0:
+        raise ValueError('n_passes should be > 0')
+    
+    if winsor < 0 or winsor >= 50:
+        raise ValueError('winsor must be in the range [0, 50)')
+    
+    if reconstruct_iter <= 0:
+        raise ValueError('reconstruct_iter must be >= 0')
+    
+    if reconstruct_scale <= 0 or reconstruct_scale > 1:
+        raise ValueError('reconstruct_scale must be in the range (0, 1]')
+    
+    if reconstruct_spread <= 0 or reconstruct_spread > 1:
+        raise ValueError('reconstruct_spread must be in the range (0, 1]')
+    
+    if sigmoid_center <= 0 or sigmoid_center >= 1:
+        raise ValueError('sigmoid_center must be in the range (0, 1)')
+    
+    if sigmoid_strength <= 0:
+        raise ValueError('sigmoid_strength must be > 0')
+
 class Dosage:
 
     MethodDosage: int = method_dosage
@@ -81,6 +124,20 @@ class Dosage:
         sigmoid_center: float = 0.5,
         sigmoid_strength: float = 10
     ) -> None:
+        validate_arguments(
+            width,
+            height,
+            sigma,
+            boundary_thickness,
+            n_passes,
+            winsor,
+            reconstruct_iter,
+            reconstruct_scale,
+            reconstruct_spread,
+            sigmoid_center,
+            sigmoid_strength
+        )
+
         self._method = method
         self._foreground_boundary = foreground_boundary
         self._n_passes = n_passes
@@ -248,6 +305,13 @@ class Dosage:
         np.divide(self.__result, weight, out=self.__result)
 
     def _normalize(self) -> None:
+        min = np.min(self.__result)
+        np.subtract(
+            self.__result,
+            min,
+            out=self.__result
+        )
+
         max = np.max(self.__result)
         if max > 0:
             np.divide(
