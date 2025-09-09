@@ -11,7 +11,7 @@ _Dosage_ is a Python library to perform visual saliency detection on images and 
 
 ### PyPI
 ```bash
-pip install dosage
+pip install pydosage
 ```
 
 ### Installing from source
