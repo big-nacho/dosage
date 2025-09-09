@@ -3,7 +3,7 @@ requires = ["scikit-build-core", "cython", "numpy"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "dosage"
+name = "pydosage"
 dynamic = ["version"]
 dependencies = ["numpy", "opencv-python"]
 
