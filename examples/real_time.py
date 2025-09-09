@@ -1,5 +1,5 @@
 import cv2
-from dosage import Dosage
+from pydosage import Dosage
 from VideoCapture import VideoCaptureThread
 
 # Usage:
