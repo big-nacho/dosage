@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from dosage import Dosage
+from pydosage import Dosage
 
 # Usage:
 # 1. Place {your_video_name.ext} in examples/input
