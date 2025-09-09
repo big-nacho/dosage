@@ -4,7 +4,7 @@ from .Morphology import Morphology, Dilate, Erode
 from typing import Literal
 import numpy.typing as npt
 
-from .dosage import (
+from .pydosage import (
     detect,
     method_dosage,
     method_fast_mbd,
