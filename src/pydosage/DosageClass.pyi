@@ -2,7 +2,7 @@ import numpy as np
 import numpy.typing as npt
 from typing import Union, Literal
 from .Morphology import Morphology
-from .dosage import method_hybrid, boundary_none
+from .pydosage import method_hybrid, boundary_none
 
 class Dosage:
     Dosage: int

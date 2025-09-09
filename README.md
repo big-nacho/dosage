@@ -1,4 +1,4 @@
-# Dosage <img src="https://img.shields.io/badge/version-v1.0.0-blue" />
+# Dosage <img src="https://img.shields.io/badge/version-v1.0.1-blue" />
 
 <img src="https://github.com/user-attachments/assets/9695decc-810a-4f28-aa64-452e7cc905a8" width="100%" />
 
@@ -11,7 +11,7 @@ _Dosage_ is a Python library to perform visual saliency detection on images and 
 
 ### PyPI
 ```bash
-pip install dosage
+pip install pydosage
 ```
 
 ### Installing from source
