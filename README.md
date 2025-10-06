@@ -9,7 +9,7 @@ _Dosage_ is a Python library to perform visual saliency detection on images and 
 
 ## Installation
 
-_Dosage_ is currently supported on macOS and Linux. If you're one Windows,
+_Dosage_ is currently supported on macOS and Linux. If you're on Windows,
 you may be able to run it via WSL.
 
 ### PyPI
